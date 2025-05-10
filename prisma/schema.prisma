@@ -1,0 +1,245 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  USER
+  PROVIDER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  WARNED
+  SUSPENDED
+  BANNED
+}
+
+enum DiplomaType {
+  ABITUR // Relevant for our case
+  MATURA
+  IB
+  AP
+  ALEVELS
+  BACCALAUREAT
+}
+
+enum SubjectType {
+  MATH
+  GERMAN
+  ENGLISH
+  BIOLOGY
+  CHEMISTRY
+  PHYSICS
+  HISTORY
+  GEOGRAPHY
+  ECONOMICS
+  COMPUTER_SCIENCE
+  ART
+  MUSIC
+  PHYSICAL_EDUCATION
+  PHILOSOPHY
+  SOCIOLOGY
+  PSYCHOLOGY
+  RELIGION
+  OTHER
+}
+
+enum NoteStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// NEW Enum for Course Level (optional, you can also use String)
+enum CourseLevel {
+  LK // Leistungskurs (Advanced Course)
+  GK // Grundkurs (Basic Course)
+}
+
+model User {
+  id             String          @id @default(cuid())
+  email          String          @unique
+  password       String
+  name           String
+  role           UserRole        @default(USER)
+  status         UserStatus      @default(ACTIVE)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  sessions       Session[]
+
+  // Provider relationship
+  providedNotes  Note[]          @relation("NoteProvider")
+
+  // Admin relationship
+  approvedNotes  Note[]          @relation("NoteApprover")
+
+  // User relationships
+  gradeTracker   GradeTracker?
+  academicGroups AcademicGroup[]
+
+  // Audit logs
+  auditLogs      AuditLog[]
+
+  // Password reset tokens
+  passwordResets PasswordReset[]
+}
+
+model PasswordReset {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Session {
+  id      String   @id @default(cuid())
+  userId  String
+  expires DateTime
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model GradeTracker {
+  id        String    @id @default(cuid())
+  userId    String    @unique
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  programs  Program[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Program {
+  id          String      @id @default(cuid())
+  name        String
+  diplomaType DiplomaType // This will be ABITUR for our use case
+  trackerId   String
+  tracker     GradeTracker @relation(fields: [trackerId], references: [id], onDelete: Cascade)
+  grades      Grade[]
+  notes       Note[] // Notes related to this diploma
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model Grade {
+  id          String   @id @default(cuid())
+  value       Float // Could be an integer if preferred (e.g., 0-15 points)
+  examId      String?
+  exam        Exam?    @relation(fields: [examId], references: [id])
+  subjectId   String
+  subject     Subject  @relation(fields: [subjectId], references: [id])
+  programId   String
+  program     Program  @relation(fields: [programId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // --- SUGGESTED ADDITIONS for Abitur calculation ---
+  courseLevel       CourseLevel? // Or String? if you prefer "LK", "GK" directly
+  semester          String?      // e.g., "11.1", "Q1", "AbiPruefung"
+  isAbiturRelevant  Boolean      @default(true) // To mark if this grade counts for the Abitur
+  // --- END SUGGESTED ADDITIONS ---
+}
+
+model Subject {
+  id          String      @id @default(cuid())
+  name        String      @unique // Consider making this non-unique if subject names can vary by school/program context but map to a SubjectType
+  description String?
+  subjectType SubjectType // Enum like MATH, GERMAN etc.
+  topics      String[] // Array of topics as strings
+  grades      Grade[]
+  notes       Note[]
+  exams       Exam[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model Note {
+  id           String     @id @default(cuid())
+  title        String
+  description  String?
+  content      String? // For markdown/LaTeX
+  fileUrl      String? // For PDF/image
+  status       NoteStatus @default(PENDING)
+
+  // Subject relationship
+  subjectId    String
+  subject      Subject    @relation(fields: [subjectId], references: [id])
+
+  // Diploma relationship (optional)
+  programId    String?
+  program      Program?   @relation(fields: [programId], references: [id])
+
+  // Provider & Approver relationships
+  providerId   String
+  provider     User       @relation("NoteProvider", fields: [providerId], references: [id], onDelete: Cascade)
+  approvedById String?
+  approvedBy   User?      @relation("NoteApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  // Additional fields
+  lang         String // Language of the note
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model School {
+  id        String   @id @default(cuid())
+  name      String
+  location  String?
+  exams     Exam[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AcademicGroup {
+  id           String   @id @default(cuid())
+  level        Int // e.g., 11th grade
+  schoolYear   String? // e.g., "2023-2024"
+  name         String? // e.g., "Class 11B" or "Advanced Physics Group"
+  users        User[]
+  exams        Exam[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Exam {
+  id              String        @id @default(cuid())
+  title           String        // e.g., "Mathematics Abitur Written Exam"
+  date            DateTime
+  subjectId       String
+  subject         Subject       @relation(fields: [subjectId], references: [id])
+  schoolId        String
+  school          School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicGroupId String
+  academicGroup   AcademicGroup @relation(fields: [academicGroupId], references: [id])
+  grades          Grade[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // --- SUGGESTED ADDITIONS for Abitur calculation ---
+  abiturExamComponent String? // e.g., "P1", "P2", "WrittenGK", "OralP4", "BLL_P5"
+  // This helps categorize the exam type specifically for Abitur rules.
+  // --- END SUGGESTED ADDITIONS ---
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action    String
+  details   Json?
+  createdAt DateTime @default(now())
+}
